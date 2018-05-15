@@ -15,33 +15,39 @@
     This code has not been tested beyond the point of it printing data to the HUD, use at own risk!
     
     TODOs:
-    Missiles are drawn in the wrong order. (pretty useless feature anyways ;-)
     Drag calculation might walk through missiles in the wrong order (more tests needed).
     Data (drag) in missile_module_table might be outdated.
-    Keep showing calculated Data for some time after missiles are destroyed (already saved in missiles[]).
-    Option to calculate drag based on current height instead of hardcoded value.
-    Option to compare actual missile data to calculated values.
+    Check Missile mass calculation.
     Check for possibility to get number of ejectors from game instead of hardcoding.
 --]]
 
 -- BEGIN CONFIG AREA
 
--- height at which the missile will fly. The range will depend on this because the drag depends on the height.
-local height = 10;
+-- Calculate air resistance based off of current missile height instead of the default value
+-- Warning: firing missiles across big altitude differentials will show wrong calculated range (Calculation will asume the missile to stay at the current altitude)
+local use_current_height = true;
+-- default height at which the missile will fly. The range will depend on this because the drag depends on the height.
+local default_height = 50;
+
+-- show comparison between calculated and current actual missile data
+local compare_with_actual = true;
 
 -- draw Missile in addition to writing data to hud
-local draw_missile  = false;
+local draw_missile  = true;
 
 -- Number of Ejectors attached to each Launchpad. Hardcoded since I have no idea how to find this in Lua.
 -- Actually helpful in case of using 4 ejectors, when one has to be removed for the Lua Transceiver.
 local numberOfEjectors = 2;
+
+-- How long after a Missile was destroyed should its info be displayed (in seconds)
+local time_to_print = 30
 
 -- END CONFIG AREA
 
 
 -- Globals
 local API;
-local missiles = {};
+local Missiles = {};
 
 local missile_module_table = {};
 missile_module_table["missile body"] =                        { name = "Body", 	                      drag = 0.01, icon = "[]", };
@@ -82,28 +88,49 @@ missile_module_table["missile sonar buoy"] =                  { name = "sonar bu
 function Update(I)
   API = I;
   API:ClearLogs();
+  
   local message = "";
+  if compare_with_actual then
+    message = "| CalcRange | ActualRange | FuelTime | RegulatorTime | ActualTime |\n";
+  else
+    message = "| CalcRange | FuelTime | RegulatorTime |\n";
+  end
+  
+  local now = API:GetTimeSinceSpawn();
+  
+  for id,Missile in pairs(Missiles) do
+    local age = now - Missile["last_seen"];
+    if age > time_to_print then
+      Missiles[id] = nil;
+    else
+      message = message .. Missile["text"];
+    end
+  end
+  
   for pad = 0, API:GetLuaTransceiverCount()-1 do
       for msl = 0, API:GetLuaControlledMissileCount(pad)-1 do
-          local missile_structure = API:GetMissileInfo(pad, msl);
-          local id = API:GetLuaControlledMissileInfo(pad, msl);
+          local MissileInfo = API:GetMissileInfo(pad, msl);
+          local MissileWarningInfo = API:GetLuaControlledMissileInfo(pad, msl);
+          local id = MissileWarningInfo.Id;
           local text = "";
-          local missile = missiles[id];
-          if missile == nil or missile["text"] == nil then
-            text = GetMissileText(id, missile_structure);
-          else
-            text = missile["text"];
+          local missile = Missiles[id];
+          if use_current_height or compare_with_actual then
+            -- calculates data based on current altitude and writes result to Missiles[] 
+            -- but does not print to avoid printing twice
+            GetMissileText(MissileWarningInfo, MissileInfo);
+          elseif missile == nil then
+            text = GetMissileText(MissileWarningInfo, MissileInfo);
+            message = message .. text;
           end
-          message = message .. text .. "\n";
       end
   end
   Print(message);
 end
 
 
-function GetMissileText(id, missile_structure)
-  local Parts = missile_structure.Parts;
-  local text = "";
+function GetMissileText(MissileWarningInfo, MissileInfo)
+  local Parts = MissileInfo.Parts;
+  local ascii_missile = "";
   local Data = {
     length = 0,
     initialSpeed = numberOfEjectors * 70,
@@ -112,7 +139,8 @@ function GetMissileText(id, missile_structure)
     drag = 0.1,
     dragCoefficient = 0,
     fuelTime = 0,
-    regulatorTime = 0,
+    regulatorTime = 45,
+ -- GUI reading 60 is wrong
     effectiveTime = 0,
     flightDistance = 0,
     mass = 0,
@@ -127,7 +155,7 @@ function GetMissileText(id, missile_structure)
     Data.drag = Data.drag + module_data["drag"] / Data.length;
     
     if name == "missile thumper head" then
-      Data.mass = Data.mass + 0.2;
+      Data.mass = Data.mass + 0.2; -- additional to the mass added for each module above
     elseif name == "missile short range thruster" then
       Data.displayedThrust = Data.displayedThrust + 1000;
       Data.initialSpeed = Data.initialSpeed + 15;
@@ -144,7 +172,7 @@ function GetMissileText(id, missile_structure)
     end
     
     if draw_missile then
-      text = text .. DrawPart(Part);
+      ascii_missile = DrawPart(Part) .. ascii_missile;
     end
   end
   
@@ -152,24 +180,45 @@ function GetMissileText(id, missile_structure)
   Data.thrust = Data.displayedThrust / 40;
   Data.initialSpeed = Data.initialSpeed + 0.75 / Data.mass;
   Data.fuelTime = Data.fuelTime / Data.displayedThrust;
-  Data.regulatorTime  = Data.regulatorTime + 60; -- was 30 for some reason
   Data.effectiveTime = math.min(Data.fuelTime, Data.regulatorTime);
   
-  Data.flightDistance = getDistanceAfterTime(Data, Data.effectiveTime, height);
+  local altitude = 0;
+  if use_current_height then
+    altitude = MissileWarningInfo.Position.y;
+    --API:Log("alt: " .. altitude);
+  else
+    altitude = default_height;
+  end
+  Data.flightDistance = getDistanceAfterTime(Data, Data.effectiveTime, altitude);
+  
+  local text = "";
+  if compare_with_actual then
+    text = "| " .. Format(Data.flightDistance, 10) .. "m | " .. 
+                   Format(MissileWarningInfo.Range, 13) .. "m | " .. 
+                   Format(Data.fuelTime, 11) .. "s | " .. 
+                   Format(Data.regulatorTime, 19) .. "s | " .. 
+                   Format(MissileWarningInfo.TimeSinceLaunch, 13) .. "s |";
+  else
+    text = "| " .. Format(Data.flightDistance, 10) .. "m | " .. 
+                   Format(Data.fuelTime, 11) .. "s | " .. 
+                   Format(Data.regulatorTime, 19) .. "s |";
+  end
   
   if draw_missile then
+    text = text .. " " .. ascii_missile .. "\n";
+  else
     text = text .. "\n";
   end
-  text = text .. "Range: " .. Data.flightDistance .. "m; TTL: " .. Data.effectiveTime .. "s.\n";
 
   for k,v in pairs(Data) do
     API:Log(k .. " " .. v);
   end
 
-  local missile = {};
-  missile["data"] = Data;
-  missile["text"] = text;
-  missiles[id] = missile;
+  local Missile = {};
+  Missile["data"] = Data;
+  Missile["text"] = text;
+  Missile["last_seen"] = API:GetTimeSinceSpawn()
+  Missiles[MissileWarningInfo.Id] = Missile;
   return text;
 end
 
@@ -183,6 +232,12 @@ function DrawPart(Part)
       return name .. ", ";
     end
 end
+
+
+function Format(num, len)
+  return string.format("%" .. len .. ".2f", num);
+end
+
 
 
 function Print(message)
@@ -238,3 +293,4 @@ function getAirDensityAtAltitude(altitude)
     return 0.5 * math.pow(0.01, (altitude - 275) / (1200 - 275));
   end
 end
+
