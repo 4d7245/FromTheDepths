@@ -25,7 +25,7 @@
 
 -- Calculate air resistance based off of current missile height instead of the default value
 -- Warning: firing missiles across big altitude differentials will show wrong calculated range (Calculation will asume the missile to stay at the current altitude)
-local use_current_height = true;
+local use_current_height = false;
 -- default height at which the missile will fly. The range will depend on this because the drag depends on the height.
 local default_height = 50;
 
@@ -91,9 +91,9 @@ function Update(I)
   
   local message = "";
   if compare_with_actual then
-    message = "| CalcRange | ActualRange | FuelTime | RegulatorTime | ActualTime |\n";
+    message = "| CalcRange |  Distance  |   Fuel    |  RegTime  | CurrentTime | CurrentSpeed | MaxSpeed | AvgSpeed |\n";
   else
-    message = "| CalcRange | FuelTime | RegulatorTime |\n";
+    message = "| CalcRange | Fuel | RegTime |\n";
   end
   
   local now = API:GetTimeSinceSpawn();
@@ -129,6 +129,10 @@ end
 
 
 function GetMissileText(MissileWarningInfo, MissileInfo)
+  local id = MissileWarningInfo.Id;
+  if Missiles[id] == nil then
+    Missiles[id] = {};
+  end
   local Parts = MissileInfo.Parts;
   local ascii_missile = "";
   local Data = {
@@ -148,10 +152,13 @@ function GetMissileText(MissileWarningInfo, MissileInfo)
   
   for _,Part in pairs(Parts) do
     local name = Part.Name;
-    API:Log("Part: " .. name);
+    --API:Log("Part: " .. name);
     Data.length = Data.length + 1;
     Data.mass = Data.mass + 0.1;
     local module_data = missile_module_table[name];
+    if module_data == nil then
+      API:Log("Part Name wrong?: " .. name);
+    end
     Data.drag = Data.drag + module_data["drag"] / Data.length;
     
     if name == "missile thumper head" then
@@ -191,17 +198,44 @@ function GetMissileText(MissileWarningInfo, MissileInfo)
   end
   Data.flightDistance = getDistanceAfterTime(Data, Data.effectiveTime, altitude);
   
+  local current_velocity = Velocity(MissileWarningInfo.Velocity);
+  
+  local velocities = Missiles[id]["velocities"];
+  if velocities == nil then
+    velocities = {};
+  end
+  table.insert(velocities, current_velocity);
+  local i = 0;
+  local average_velocity = 0;
+  for _,v in pairs(velocities) do
+    i = i + 1;
+    average_velocity = average_velocity + v;
+  end
+  average_velocity = average_velocity / i;
+
+  local max_velocity = Missiles[id]["max_speed"];
+  if max_velocity == nil then
+    max_velocity = -99999;
+  end
+  if current_velocity > max_velocity then
+    max_velocity = current_velocity;
+    Missiles[id]["max_speed"] = current_velocity;
+  end
+  
   local text = "";
   if compare_with_actual then
-    text = "| " .. Format(Data.flightDistance, 10) .. "m | " .. 
-                   Format(MissileWarningInfo.Range, 13) .. "m | " .. 
-                   Format(Data.fuelTime, 11) .. "s | " .. 
-                   Format(Data.regulatorTime, 19) .. "s | " .. 
-                   Format(MissileWarningInfo.TimeSinceLaunch, 13) .. "s |";
+    text = "| " .. Format(Data.flightDistance, 9) .. "m | " .. 
+                   Format(MissileWarningInfo.Range, 8) .. "m | " .. 
+                   Format(Data.fuelTime, 6) .. "s | " .. 
+                   Format(Data.regulatorTime, 10) .. "s | " .. 
+                   Format(MissileWarningInfo.TimeSinceLaunch, 16) .. "s | " ..
+                   Format(current_velocity, 14) .. "m/s | " ..
+                   Format(max_velocity, 8) .. "m/s | " ..
+                   Format(average_velocity, 8) .. "m/s |";
   else
     text = "| " .. Format(Data.flightDistance, 10) .. "m | " .. 
-                   Format(Data.fuelTime, 11) .. "s | " .. 
-                   Format(Data.regulatorTime, 19) .. "s |";
+                   Format(Data.fuelTime, 6) .. "s | " .. 
+                   Format(Data.regulatorTime, 10) .. "s |";
   end
   
   if draw_missile then
@@ -214,11 +248,10 @@ function GetMissileText(MissileWarningInfo, MissileInfo)
     API:Log(k .. " " .. v);
   end
 
-  local Missile = {};
-  Missile["data"] = Data;
-  Missile["text"] = text;
-  Missile["last_seen"] = API:GetTimeSinceSpawn()
-  Missiles[MissileWarningInfo.Id] = Missile;
+
+  Missiles[id]["data"] = Data;
+  Missiles[id]["text"] = text;
+  Missiles[id]["last_seen"] = API:GetTimeSinceSpawn();
   return text;
 end
 
@@ -292,5 +325,10 @@ function getAirDensityAtAltitude(altitude)
   else
     return 0.5 * math.pow(0.01, (altitude - 275) / (1200 - 275));
   end
+end
+
+
+function Velocity(velocityVector)
+  return math.sqrt(velocityVector.x^2 + velocityVector.y^2 + velocityVector.z^2)
 end
 
