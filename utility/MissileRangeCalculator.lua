@@ -25,7 +25,7 @@
 
 -- Calculate air resistance based off of current missile height instead of the default value
 -- Warning: firing missiles across big altitude differentials will show wrong calculated range (Calculation will asume the missile to stay at the current altitude)
-local use_current_height = true;
+local use_current_height = false;
 -- default height at which the missile will fly. The range will depend on this because the drag depends on the height.
 local default_height = 50;
 
@@ -91,7 +91,7 @@ function Update(I)
   
   local message = "";
   if compare_with_actual then
-    message = "| CalcRange | CurrentDistance | Fuel | RegTime | CurrentTime | CurrentSpeed | MaxSpeed | AvgSpeed |\n";
+    message = "| CalcRange |  Distance  |   Fuel    |  RegTime  | CurrentTime | CurrentSpeed | MaxSpeed | AvgSpeed |\n";
   else
     message = "| CalcRange | Fuel | RegTime |\n";
   end
@@ -201,7 +201,7 @@ function GetMissileText(MissileWarningInfo, MissileInfo)
   local current_velocity = Velocity(MissileWarningInfo.Velocity);
   
   local velocities = Missiles[id]["velocities"];
-  if velocities = nil then
+  if velocities == nil then
     velocities = {};
   end
   table.insert(velocities, current_velocity);
@@ -214,6 +214,9 @@ function GetMissileText(MissileWarningInfo, MissileInfo)
   average_velocity = average_velocity / i;
 
   local max_velocity = Missiles[id]["max_speed"];
+  if max_velocity == nil then
+    max_velocity = -99999;
+  end
   if current_velocity > max_velocity then
     max_velocity = current_velocity;
     Missiles[id]["max_speed"] = current_velocity;
@@ -221,18 +224,18 @@ function GetMissileText(MissileWarningInfo, MissileInfo)
   
   local text = "";
   if compare_with_actual then
-    text = "| " .. Format(Data.flightDistance, 10) .. "m | " .. 
-                   Format(MissileWarningInfo.Range, 13) .. "m | " .. 
-                   Format(Data.fuelTime, 11) .. "s | " .. 
-                   Format(Data.regulatorTime, 19) .. "s | " .. 
-                   Format(MissileWarningInfo.TimeSinceLaunch, 13) .. "s | " ..
-                   Format(current_velocity, 10) .. "m/s | " ..
-                   Format(max_velocity, 10) .. "m/s | " ..
-                   Format(average_velocity, 10) .. "m/s |";
+    text = "| " .. Format(Data.flightDistance, 9) .. "m | " .. 
+                   Format(MissileWarningInfo.Range, 8) .. "m | " .. 
+                   Format(Data.fuelTime, 6) .. "s | " .. 
+                   Format(Data.regulatorTime, 10) .. "s | " .. 
+                   Format(MissileWarningInfo.TimeSinceLaunch, 16) .. "s | " ..
+                   Format(current_velocity, 14) .. "m/s | " ..
+                   Format(max_velocity, 8) .. "m/s | " ..
+                   Format(average_velocity, 8) .. "m/s |";
   else
     text = "| " .. Format(Data.flightDistance, 10) .. "m | " .. 
-                   Format(Data.fuelTime, 11) .. "s | " .. 
-                   Format(Data.regulatorTime, 19) .. "s |";
+                   Format(Data.fuelTime, 6) .. "s | " .. 
+                   Format(Data.regulatorTime, 10) .. "s |";
   end
   
   if draw_missile then
